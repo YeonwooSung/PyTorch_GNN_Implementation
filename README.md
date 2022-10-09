@@ -17,3 +17,10 @@ pip install -r requirements.txt
 
 - [Graph Convolutional Network](./src/gcn/)
 - [Graph Attention Network](./src/gat/)
+
+## ToDo
+
+[ ] Add requirements.txt
+[ ] Add training codes
+    [ ] Add training codes for GCN
+    [ ] Add training codes for GAT
