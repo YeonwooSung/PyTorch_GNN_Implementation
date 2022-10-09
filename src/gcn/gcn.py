@@ -51,18 +51,26 @@ class GCN(nn.Module):
     def __init__(self, 
         input_dim, 
         support,
+        num_classes,
         dropout_rate=0., 
-        num_classes=10,
-        hidden_dim=200,
+        hidden_dim=256,
+        num_hidden_layers=2,
     ):
         super(GCN, self).__init__()
         
         # GraphConvolution
         self.layer_in = GraphConvolutionLayer(input_dim, hidden_dim, support, act_func=nn.ReLU(), featureless=True, dropout_rate=dropout_rate)
         self.layer_out = GraphConvolutionLayer(hidden_dim, num_classes, support, dropout_rate=dropout_rate)
+
+        self.num_hidden_layers = num_hidden_layers
+        self.hidden_layers = nn.ModuleList()
+        for i in range(num_hidden_layers):
+            self.hidden_layers.append(GraphConvolutionLayer(hidden_dim, hidden_dim, support, act_func=nn.ReLU(), dropout_rate=dropout_rate))
         
     
     def forward(self, x):
         out = self.layer_in(x)
+        for i in range(self.num_hidden_layers):
+            out = self.hidden_layers[i](out)
         out = self.layer_out(out)
         return out
