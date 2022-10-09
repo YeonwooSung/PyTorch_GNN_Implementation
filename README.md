@@ -20,7 +20,7 @@ pip install -r requirements.txt
 
 ## ToDo
 
-[ ] Add requirements.txt
-[ ] Add training codes
-    [ ] Add training codes for GCN
-    [ ] Add training codes for GAT
+- [ ] Add requirements.txt
+- [ ] Add training codes
+    - [ ] Add training codes for GCN
+    - [ ] Add training codes for GAT
