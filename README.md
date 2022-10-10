@@ -21,6 +21,7 @@ pip install -r requirements.txt
 ## ToDo
 
 - [ ] Add requirements.txt
+- [ ] Reimplement GCN and GAT with pytorch geometric
 - [ ] Add training codes
     - [ ] Add training codes for GCN
     - [ ] Add training codes for GAT
