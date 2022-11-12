@@ -1,38 +1,22 @@
 import torch
-from torch import nn
-from torch.nn import functional as F
+import torch.nn as nn
+import torch.nn.functional as F
 
 
-
-class GATLayer(nn.Module):
-    """
-    This implementation was inspired by PyTorch Geometric: https://github.com/rusty1s/pytorch_geometric
-    But, it's hopefully much more readable! (and of similar performance)
-    It's suitable for both transductive and inductive settings. In the inductive setting we just merge the graphs
-    into a single graph with multiple components and this layer is agnostic to that fact! <3
-    """
-
+class GATLayer(torch.nn.Module):
+    # We'll use these constants in many functions so just extracting them here as member fields
     src_nodes_dim = 0  # position of source nodes in edge index
     trg_nodes_dim = 1  # position of target nodes in edge index
 
-    nodes_dim = 0      # node dimension/axis
-    head_dim = 1       # attention head dimension/axis
+    # These may change in the inductive setting - leaving it like this for now (not future proof)
+    nodes_dim = 0      # node dimension (axis is maybe a more familiar term nodes_dim is the position of "N" in tensor)
+    head_dim = 1       # attention head dim
 
-    def __init__(
-        self, 
-        num_in_features, 
-        num_out_features, 
-        num_of_heads, 
-        concat=True, 
-        activation=nn.ELU(),
-        dropout_prob=0.6, 
-        add_skip_connection=True, 
-        bias=True, 
-        log_attention_weights=False
-    ):
+    def __init__(self, num_in_features, num_out_features, num_of_heads, concat=True, activation=nn.ELU(),
+                 dropout_prob=0.6, add_skip_connection=True, bias=True, log_attention_weights=False):
+
         super().__init__()
 
-        # Saving these as we'll need them in forward propagation in children layers (imp1/2/3)
         self.num_of_heads = num_of_heads
         self.num_out_features = num_out_features
         self.concat = concat  # whether we should concatenate or average the attention heads
@@ -46,15 +30,12 @@ class GATLayer(nn.Module):
         # You can treat this one matrix as num_of_heads independent W matrices
         self.linear_proj = nn.Linear(num_in_features, num_of_heads * num_out_features, bias=False)
 
-
-        # After we concatenate target node (node i) and source node (node j) we apply the additive scoring function
+        # After we concatenate target node (node i) and source node (node j) we apply the "additive" scoring function
         # which gives us un-normalized score "e". Here we split the "a" vector - but the semantics remain the same.
-
         # Basically instead of doing [x, y] (concatenation, x/y are node feature vectors) and dot product with "a"
         # we instead do a dot product between x and "a_left" and y and "a_right" and we sum them up
         self.scoring_fn_target = nn.Parameter(torch.Tensor(1, num_of_heads, num_out_features))
         self.scoring_fn_source = nn.Parameter(torch.Tensor(1, num_of_heads, num_out_features))
-
 
         # Bias is definitely not crucial to GAT - feel free to experiment (I pinged the main author, Petar, on this one)
         if bias and concat:
@@ -74,7 +55,6 @@ class GATLayer(nn.Module):
         #
 
         self.leakyReLU = nn.LeakyReLU(0.2)  # using 0.2 as in the paper, no need to expose every setting
-        self.softmax = nn.Softmax(dim=-1)  # -1 stands for apply the log-softmax along the last dimension
         self.activation = activation
         # Probably not the nicest design but I use the same module in 3 locations, before/after features projection
         # and for attention coefficients. Functionality-wise it's the same as using independent modules.
@@ -83,25 +63,13 @@ class GATLayer(nn.Module):
         self.log_attention_weights = log_attention_weights  # whether we should log the attention weights
         self.attention_weights = None  # for later visualization purposes, I cache the weights here
 
-
-    def init_params(self):
-        """
-        The reason we're using Glorot (aka Xavier uniform) initialization is because it's a default TF initialization:
-            https://stackoverflow.com/questions/37350131/what-is-the-default-variable-initializer-in-tensorflow
-        The original repo was developed in TensorFlow (TF) and they used the default initialization.
-        Feel free to experiment - there may be better initializations depending on your problem.
-        """
-        nn.init.xavier_uniform_(self.linear_proj.weight)
-        nn.init.xavier_uniform_(self.scoring_fn_target)
-        nn.init.xavier_uniform_(self.scoring_fn_source)
-        if self.bias is not None:
-            torch.nn.init.zeros_(self.bias)
-
-
+        self.init_params()
+        
     def forward(self, data):
         #
         # Step 1: Linear Projection + regularization
         #
+
         in_nodes_features, edge_index = data  # unpack data
         num_of_nodes = in_nodes_features.shape[self.nodes_dim]
         assert edge_index.shape[0] == 2, f'Expected edge index with shape=(2,E) got {edge_index.shape}'
@@ -115,7 +83,7 @@ class GATLayer(nn.Module):
         # We project the input node features into NH independent output features (one for each attention head)
         nodes_features_proj = self.linear_proj(in_nodes_features).view(-1, self.num_of_heads, self.num_out_features)
 
-        nodes_features_proj = self.dropout(nodes_features_proj)  # in the official GAT implementation they did dropout here as well
+        nodes_features_proj = self.dropout(nodes_features_proj)  # in the official GAT imp they did dropout here as well
 
         #
         # Step 2: Edge attention calculation
@@ -168,13 +136,16 @@ class GATLayer(nn.Module):
         Two of them 1, 2 are connected to node 3. If we want to calculate the representation for node 3 we should take
         into account feature vectors of 1, 2 and 3 itself. Since we have scores for edges 1-3, 2-3 and 3-3
         in scores_per_edge variable, this function will calculate attention scores like this: 1-3/(1-3+2-3+3-3)
-        (where 1-3 is overloaded notation it represents the edge 1-3 and it's (exp) score) and similarly for 2-3 and 3-3
+        (where 1-3 is overloaded notation it represents the edge 1-3 and its (exp) score) and similarly for 2-3 and 3-3
          i.e. for this neighborhood we don't care about other edge scores that include nodes 4 and 5.
+
         Note:
         Subtracting the max value from logits doesn't change the end result but it improves the numerical stability
         and it's a fairly common "trick" used in pretty much every deep learning framework.
         Check out this link for more details:
+
         https://stats.stackexchange.com/questions/338285/how-does-the-subtraction-of-the-logit-maximum-improve-learning
+
         """
         # Calculate the numerator. Make logits <= 0 so that e^logit <= 1 (this will improve the numerical stability)
         scores_per_edge = scores_per_edge - scores_per_edge.max()
@@ -225,6 +196,7 @@ class GATLayer(nn.Module):
         """
         Lifts i.e. duplicates certain vectors depending on the edge index.
         One of the tensor dims goes from N -> E (that's where the "lift" comes from).
+
         """
         src_nodes_index = edge_index[self.src_nodes_dim]
         trg_nodes_index = edge_index[self.trg_nodes_dim]
@@ -236,7 +208,6 @@ class GATLayer(nn.Module):
 
         return scores_source, scores_target, nodes_features_matrix_proj_lifted
 
-
     def explicit_broadcast(self, this, other):
         # Append singleton dimensions until this.dim() == other.dim()
         for _ in range(this.dim(), other.dim()):
@@ -244,16 +215,26 @@ class GATLayer(nn.Module):
 
         # Explicitly expand so that shapes are the same
         return this.expand_as(other)
-    
+
+    def init_params(self):
+        """
+        The reason we're using Glorot (aka Xavier uniform) initialization is because it's a default TF initialization:
+            https://stackoverflow.com/questions/37350131/what-is-the-default-variable-initializer-in-tensorflow
+
+        The original repo was developed in TensorFlow (TF) and they used the default initialization.
+        Feel free to experiment - there may be better initializations depending on your problem.
+
+        """
+        nn.init.xavier_uniform_(self.linear_proj.weight)
+        nn.init.xavier_uniform_(self.scoring_fn_target)
+        nn.init.xavier_uniform_(self.scoring_fn_source)
+
+        if self.bias is not None:
+            torch.nn.init.zeros_(self.bias)
 
     def skip_concat_bias(self, attention_coefficients, in_nodes_features, out_nodes_features):
         if self.log_attention_weights:  # potentially log for later visualization in playground.py
             self.attention_weights = attention_coefficients
-
-        # if the tensor is not contiguously stored in memory we'll get an error after we try to do certain ops like view
-        # only imp1 will enter this one
-        if not out_nodes_features.is_contiguous():
-            out_nodes_features = out_nodes_features.contiguous()
 
         if self.add_skip_connection:  # add skip or residual connection
             if out_nodes_features.shape[-1] == in_nodes_features.shape[-1]:  # if FIN == FOUT
@@ -278,23 +259,21 @@ class GATLayer(nn.Module):
         return out_nodes_features if self.activation is None else self.activation(out_nodes_features)
 
 
+class GAT(torch.nn.Module):
+    """
+    The most interesting and hardest implementation is implementation #3.
+    Imp1 and imp2 differ in subtle details but are basically the same thing.
 
-class GAT(nn.Module):
-    def __init__(
-        self, 
-        num_of_layers, 
-        num_heads_per_layer, 
-        num_features_per_layer, 
-        add_skip_connection=True, 
-        bias=True,
-        dropout=0.6, 
-        log_attention_weights=False
-    ):
+    So I'll focus on imp #3 in this notebook.
+
+    """
+
+    def __init__(self, num_of_layers, num_heads_per_layer, num_features_per_layer, add_skip_connection=True, bias=True,
+                 dropout=0.6, log_attention_weights=False):
         super().__init__()
         assert num_of_layers == len(num_heads_per_layer) == len(num_features_per_layer) - 1, f'Enter valid arch params.'
 
-        # by defining the number of heads per each GAT layer, we can create a GAT layers easily as you could see below
-        num_heads_per_layer = [1] + num_heads_per_layer
+        num_heads_per_layer = [1] + num_heads_per_layer  # trick - so that I can nicely create GAT layers below
 
         gat_layers = []  # collect GAT layers
         for i in range(num_of_layers):
@@ -317,6 +296,8 @@ class GAT(nn.Module):
 
 
     def forward(self, data):
-        # The data is just a (in_nodes_features, topology) tuple
-        # This is due to the limitation of the PyTorch Sequential module; it can only take one argument as input, and only able to return a single data as an output.
+        '''
+        The data is just a tuple of (node_features, edge_index).
+        This is basically due to the limitation of the PyTorch Sequential module.
+        '''
         return self.gat_net(data)
