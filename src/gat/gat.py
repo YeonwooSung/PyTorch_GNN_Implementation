@@ -293,7 +293,8 @@ class GAT(nn.Module):
         super().__init__()
         assert num_of_layers == len(num_heads_per_layer) == len(num_features_per_layer) - 1, f'Enter valid arch params.'
 
-        num_heads_per_layer = [1] + num_heads_per_layer  # trick - so that I can nicely create GAT layers below
+        # by defining the number of heads per each GAT layer, we can create a GAT layers easily as you could see below
+        num_heads_per_layer = [1] + num_heads_per_layer
 
         gat_layers = []  # collect GAT layers
         for i in range(num_of_layers):
@@ -316,6 +317,6 @@ class GAT(nn.Module):
 
 
     def forward(self, data):
-        # The data is just a (in_nodes_features, topology) tuple - the reason that I designed it like this because of the nn.Sequential:
-        # https://discuss.pytorch.org/t/forward-takes-2-positional-arguments-but-3-were-given-for-nn-sqeuential-with-linear-layers/65698
+        # The data is just a (in_nodes_features, topology) tuple
+        # This is due to the limitation of the PyTorch Sequential module; it can only take one argument as input, and only able to return a single data as an output.
         return self.gat_net(data)
