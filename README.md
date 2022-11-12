@@ -19,8 +19,3 @@ pip install -r requirements.txt
 - [Graph Attention Network](./src/gat/)
 
 ## ToDo
-
-- [v] Add requirements.txt
-- [ ] Add training codes
-    - [ ] Add training codes for GCN
-    - [ ] Add training codes for GAT
