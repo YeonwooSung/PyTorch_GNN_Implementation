@@ -19,3 +19,5 @@ pip install -r requirements.txt
 - [Graph Attention Network](./src/gat/)
 
 ## ToDo
+
+[ ] Implement GAT-v2 with PyTorch
