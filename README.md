@@ -20,4 +20,5 @@ pip install -r requirements.txt
 
 ## ToDo
 
-[ ] Implement GAT-v2 with PyTorch
+[x] Implement GAT-v2 with PyTorch
+    [ ] Add training code for GAT-v2
