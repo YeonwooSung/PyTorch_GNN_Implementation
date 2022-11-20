@@ -12,18 +12,20 @@ class GraphAttentionV2Layer(nn.Module):
         is_concat: bool = True,
         dropout: float = 0.6,
         leaky_relu_negative_slope: float = 0.2,
-        share_weights: bool = False
+        share_weights: bool = False,
+        is_output_layer: bool = False,
     ) -> None:
         super().__init__()
         self.is_concat = is_concat
         self.n_heads = n_heads
         self.share_weights = share_weights
+        self.is_output_layer = is_output_layer
 
         if is_concat:
             assert out_features % n_heads == 0
-            self.hidden = out_features // n_heads
+            self.n_hidden = out_features // n_heads
         else:
-            self.hidden = out_features
+            self.n_hidden = out_features
         
         # Linear layer for initial source transformation;
         # i.e. to transform the source node embeddings before self-attention
@@ -73,6 +75,8 @@ class GraphAttentionV2Layer(nn.Module):
 
         # The adjacency matrix should have shape
         # `[n_nodes, n_nodes, n_heads]` or`[n_nodes, n_nodes, 1]`
+        # print(adj_mat.shape)
+        # print(n_nodes)
         assert adj_mat.shape[0] == 1 or adj_mat.shape[0] == n_nodes
         assert adj_mat.shape[1] == 1 or adj_mat.shape[1] == n_nodes
         assert adj_mat.shape[2] == 1 or adj_mat.shape[2] == self.n_heads
@@ -99,6 +103,9 @@ class GraphAttentionV2Layer(nn.Module):
         else:
             h_prime = torch.mean(h_prime, dim=1)
 
+        # do not apply activation and dropout for the output layer
+        if self.is_output_layer:
+            return h_prime
         # apply activation and dropout
         return self.output_dropout(self.output_act(h_prime))
 
@@ -137,7 +144,7 @@ class GATV2(nn.Module):
             self.layers.append(GraphAttentionV2Layer(n_hidden, n_hidden, n_heads, share_weights=share_weights))
 
         # add output layer
-        self.layers.append(GraphAttentionV2Layer(n_hidden, n_classes, 1, is_concat=False, dropout=dropout, share_weights=share_weights))
+        self.layers.append(GraphAttentionV2Layer(n_hidden, n_classes, 1, is_concat=False, dropout=dropout, share_weights=share_weights, is_output_layer=True))
 
 
     def forward(self, x: torch.Tensor, adj_mat: torch.Tensor) -> torch.Tensor:
