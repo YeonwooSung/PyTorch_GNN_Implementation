@@ -43,6 +43,8 @@ class GraphAttentionV2Layer(nn.Module):
         # Dropout layer to be applied for attention
         self.dropout = nn.Dropout(dropout)
 
+        self.output_act = nn.ELU()
+        self.output_dropout = nn.Dropout(dropout)
 
     def forward(self, h: torch.Tensor, adj_mat: torch.Tensor, use_einsum=True) -> torch.Tensor:
         """
@@ -97,6 +99,9 @@ class GraphAttentionV2Layer(nn.Module):
         else:
             h_prime = torch.mean(h_prime, dim=1)
 
+        # apply activation and dropout
+        return self.output_dropout(self.output_act(h_prime))
+
 
 
 class GATV2(nn.Module):
@@ -107,6 +112,7 @@ class GATV2(nn.Module):
         n_classes: int, 
         n_heads: int, 
         dropout: float,
+        num_of_layers: int = 2,
         share_weights: bool = True
     ) -> None:
         """
@@ -115,10 +121,31 @@ class GATV2(nn.Module):
         * `n_classes` is the number of classes
         * `n_heads` is the number of heads in the graph attention layers
         * `dropout` is the dropout probability
+        * `num_of_layers` is the number of graph attention layers
         * `share_weights` if set to True, the same matrix will be applied to the source and the target node of every edge
         """
         super().__init__()
+        self.num_of_layers = num_of_layers
+        
+        self.layers = nn.ModuleList()
+
+        # add input layer
+        self.layers.append(GraphAttentionV2Layer(in_features, n_hidden, n_heads, is_concat=True, dropout=dropout, share_weights=share_weights))
+        
+        # add hidden layers
+        for i in range(num_of_layers - 2):
+            self.layers.append(GraphAttentionV2Layer(n_hidden, n_hidden, n_heads, share_weights=share_weights))
+
+        # add output layer
+        self.layers.append(GraphAttentionV2Layer(n_hidden, n_classes, 1, is_concat=False, dropout=dropout, share_weights=share_weights))
 
 
-    def forward(self, x):
-        pass
+    def forward(self, x: torch.Tensor, adj_mat: torch.Tensor) -> torch.Tensor:
+        """
+        * `x` is the features vectors of shape `[n_nodes, in_features]`
+        * `adj_mat` is the adjacency matrix of the form
+         `[n_nodes, n_nodes, n_heads]` or `[n_nodes, n_nodes, 1]`
+        """
+        for i in range(self.num_of_layers):
+            x = self.layers[i](x, adj_mat)
+        return x
