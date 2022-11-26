@@ -90,9 +90,11 @@ def load_graph_data(device):
 
     # generate adjacency matrix from edge index
     # shape = (N, N, 1), where N is the number of nodes
-    adjacency_matrix = sp.coo_matrix((np.ones(topology.shape[1]), (topology[0], topology[1])), shape=(num_of_nodes, num_of_nodes))
+    adj = sp.coo_matrix((np.ones(topology.shape[1]), (topology[0], topology[1])), shape=(num_of_nodes, num_of_nodes))
+    adj += adj.T.multiply(adj.T > adj) - adj.multiply(adj.T > adj)
+
     # adjacency_matrix to numpy array
-    adjacency_matrix = adjacency_matrix.toarray()
+    adjacency_matrix = adj.toarray()
     adjacency_matrix = adjacency_matrix[:, :, np.newaxis]
     
     # adjacency_matrix to tensor
