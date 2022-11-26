@@ -4,6 +4,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 #-------------------------------------------------
 # Aggregators
 
@@ -56,9 +58,9 @@ class AggregationLayer(nn.Module):
 
         n = _len(nodes)
         if self.__class__.__name__ == 'LSTMAggregationLayer':
-            out = torch.zeros(n, 2*self.output_dim).to(self.device)
+            out = torch.zeros(n, 2*self.output_dim).to(DEVICE)
         else:
-            out = torch.zeros(n, self.output_dim).to(self.device)
+            out = torch.zeros(n, self.output_dim).to(DEVICE)
         for i in range(n):
             if _len(sampled_rows[i]) != 0:
                 out[i, :] = self.aggregate(features[sampled_rows[i], :])
@@ -90,7 +92,7 @@ class MeanAggregationLayer(AggregationLayer):
 
 
 class LSTMAggregationLayer(AggregationLayer):
-    def __init__(self, input_dim, output_dim, device='cpu'):
+    def __init__(self, input_dim, output_dim):
         """
         Parameters
         ----------
@@ -100,7 +102,7 @@ class LSTMAggregationLayer(AggregationLayer):
             Dimension of output node features. Used for defining LSTM layer. Currently only works when output_dim = input_dim.
         """
         # super(LSTMAggregator, self).__init__(input_dim, output_dim, device)
-        super().__init__(input_dim, output_dim, device)
+        super().__init__(input_dim, output_dim)
         self.lstm = nn.LSTM(input_dim, output_dim, bidirectional=True, batch_first=True)
 
     def aggregate(self, features):
@@ -129,7 +131,7 @@ class LSTMAggregationLayer(AggregationLayer):
 
 class PoolingAggregationLayer(AggregationLayer):
 
-    def __init__(self, input_dim, output_dim, device='cpu'):
+    def __init__(self, input_dim, output_dim):
         """
         Parameters
         ----------
@@ -138,7 +140,7 @@ class PoolingAggregationLayer(AggregationLayer):
         output_dim : int
             Dimension of output node features. Used for defining fully connected layer. Currently only works when output_dim = input_dim.
         """
-        super().__init__(input_dim, output_dim, device)
+        super().__init__(input_dim, output_dim)
 
         self.fc1 = nn.Linear(input_dim, output_dim)
         self.relu = nn.ReLU()
@@ -232,11 +234,11 @@ class GraphSAGE(nn.Module):
         assert agg_class in ['mean', 'mean-pooling', 'max-pooling', 'lstm']
 
         self.input_dim = input_dim
-        self.hidden_dims = hidden_dims
+        self.hidden_dims = hidden_dims if type(hidden_dims) == list else [hidden_dims]
         self.output_dim = output_dim
         self.agg_class = agg_class
         self.num_samples = num_samples
-        self.num_layers = len(hidden_dims) + 1
+        self.num_layers = len(hidden_dims) + 1 if type(hidden_dims) == list else 3
 
         aggregation_layer = {
             'mean': MeanAggregationLayer,
@@ -245,16 +247,24 @@ class GraphSAGE(nn.Module):
             'lstm': LSTMAggregationLayer
         }[agg_class]
 
-        self.aggregators = nn.ModuleList([aggregation_layer(input_dim, input_dim)])
-        self.aggregators.extend([aggregation_layer(dim, dim) for dim in hidden_dims])
 
         c = 3 if aggregation_layer == LSTMAggregationLayer else 2
 
-        self.fcs = nn.ModuleList([nn.Linear(c*input_dim, hidden_dims[0])])
-        self.fcs.extend([nn.Linear(c*hidden_dims[i-1], hidden_dims[i]) for i in range(1, len(hidden_dims))])
-        self.fcs.extend([nn.Linear(c*hidden_dims[-1], output_dim)])
+        if type(hidden_dims) != list:
+            self.fcs = nn.ModuleList([nn.Linear(c*input_dim, hidden_dims), nn.Linear(c*hidden_dims, hidden_dims), nn.Linear(c*hidden_dims, output_dim)])
+            self.bns = nn.ModuleList([nn.BatchNorm1d(hidden_dims), nn.BatchNorm1d(hidden_dims)])
 
-        self.bns = nn.ModuleList([nn.BatchNorm1d(hidden_dim) for hidden_dim in hidden_dims])
+            self.aggregators = nn.ModuleList([aggregation_layer(input_dim, input_dim), aggregation_layer(hidden_dims, hidden_dims), aggregation_layer(hidden_dims, hidden_dims)])
+        else:
+            self.aggregators = nn.ModuleList([aggregation_layer(input_dim, input_dim)])
+            self.aggregators.extend([aggregation_layer(dim, dim) for dim in self.hidden_dims])
+            self.aggregators.extend([aggregation_layer(self.hidden_dims[-1], output_dim)])
+
+            self.fcs = nn.ModuleList([nn.Linear(c*input_dim, hidden_dims[0])])
+            self.fcs.extend([nn.Linear(c*hidden_dims[i-1], hidden_dims[i]) for i in range(1, len(hidden_dims))])
+            self.fcs.extend([nn.Linear(c*hidden_dims[-1], output_dim)])
+
+            self.bns = nn.ModuleList([nn.BatchNorm1d(hidden_dim) for hidden_dim in hidden_dims])
 
         self.dropout = nn.Dropout(dropout)
 
@@ -295,11 +305,13 @@ class GraphSAGE(nn.Module):
             An (len(node_layers[-1]) x output_dim) tensor of output node features.
         """
         output = features
+        print(output.shape)
 
         def is_last_layer(i):
             return i == self.num_layers - 1
 
         for k in range(self.num_layers):
+            print(f'Layer {k}')
             nodes = node_layers[k+1]
             mapping = mappings[k]
             init_mapped_nodes = np.array([mappings[0][v] for v in nodes], dtype=np.int64)
@@ -327,4 +339,6 @@ class GraphSAGE(nn.Module):
             output = self.dropout(output)
             divider = output.norm(dim=1, keepdim=True) + eps
             output = output.div(divider)
+            print(output.shape)
+        print(output.shape)
         return output
