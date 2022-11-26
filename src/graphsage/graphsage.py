@@ -259,8 +259,15 @@ class GraphSAGE(nn.Module):
 
         self.relu = nn.ReLU()
     
-    
-    def forward(self, features, node_layers, mappings, rows):
+
+    def forward(
+        self, 
+        features, 
+        node_layers, 
+        mappings, 
+        rows, 
+        eps=1e-6,
+    ) -> torch.Tensor:
         """
         Parameters
         ----------
@@ -276,26 +283,36 @@ class GraphSAGE(nn.Module):
             mappings[i][5] = 1.
         rows : numpy array
             rows[i] is an array of neighbors of node i.
+        eps: float
+            A small number to avoid division by zero.
+            default: 1e-6.
+
         Returns
         -------
         out : torch.Tensor
             An (len(node_layers[-1]) x output_dim) tensor of output node features.
         """
-        out = features
+        output = features
+
+        def is_last_layer(i):
+            return i == self.num_layers - 1
+
         for k in range(self.num_layers):
             nodes = node_layers[k+1]
             mapping = mappings[k]
             init_mapped_nodes = np.array([mappings[0][v] for v in nodes], dtype=np.int64)
             cur_rows = rows[init_mapped_nodes]
-            aggregate = self.aggregators[k](out, nodes, mapping, cur_rows,
-                                            self.num_samples)
-            cur_mapped_nodes = np.array([mapping[v] for v in nodes], dtype=np.int64)
-            out = torch.cat((out[cur_mapped_nodes, :], aggregate), dim=1)
-            out = self.fcs[k](out)
-            if k+1 < self.num_layers:
-                out = self.relu(out)
-                out = self.bns[k](out)
-                out = self.dropout(out)
-                out = out.div(out.norm(dim=1, keepdim=True)+1e-6)
+            
+            aggregate = self.aggregators[k](output, nodes, mapping, cur_rows, self.num_samples)
 
-        return out
+            cur_mapped_nodes = np.array([mapping[v] for v in nodes], dtype=np.int64)
+            output = torch.cat((output[cur_mapped_nodes, :], aggregate), dim=1)
+            output = self.fcs[k](output)
+            if is_last_layer(k):
+                break
+            output = self.relu(output)
+            output = self.bns[k](output)
+            output = self.dropout(output)
+            divider = output.norm(dim=1, keepdim=True) + eps
+            output = output.div(divider)
+        return output
