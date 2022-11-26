@@ -1,4 +1,3 @@
-import math
 import numpy as np
 import torch
 import torch.nn as nn
@@ -174,6 +173,7 @@ class MaxPoolingAggregationLayer(PoolingAggregationLayer):
         ----------
         features : torch.Tensor
             Input features.
+
         Returns
         -------
         Aggregated feature.
@@ -188,6 +188,7 @@ class MeanPoolingAggregator(PoolingAggregationLayer):
         ----------
         features : torch.Tensor
             Input features.
+
         Returns
         -------
         Aggregated feature.
@@ -204,7 +205,7 @@ class GraphSAGE(nn.Module):
         input_dim, 
         hidden_dims, 
         output_dim,
-        agg_class='maxpooling', 
+        agg_class='max-pooling', 
         dropout=0.5, 
         num_samples=25
     ) -> None:
@@ -265,7 +266,7 @@ class GraphSAGE(nn.Module):
         features, 
         node_layers, 
         mappings, 
-        rows, 
+        adjacent_matrix, 
         eps=1e-6,
     ) -> torch.Tensor:
         """
@@ -281,8 +282,9 @@ class GraphSAGE(nn.Module):
             in node_layers[i] to its position in node_layers[i]. For example,
             if node_layers[i] = [2,5], then mappings[i][2] = 0 and
             mappings[i][5] = 1.
-        rows : numpy array
-            rows[i] is an array of neighbors of node i.
+        adjacent_matrix : numpy array
+            An (n' x n') adjacency matrix of the computation graph.
+            adjacent_matrix[i] is an array of neighbors of node i.
         eps: float
             A small number to avoid division by zero.
             default: 1e-6.
@@ -301,15 +303,25 @@ class GraphSAGE(nn.Module):
             nodes = node_layers[k+1]
             mapping = mappings[k]
             init_mapped_nodes = np.array([mappings[0][v] for v in nodes], dtype=np.int64)
-            cur_rows = rows[init_mapped_nodes]
+
+            # get neighbor nodes of current target nodes by sampling from adjacent matrix
+            cur_rows = adjacent_matrix[init_mapped_nodes]
             
             aggregate = self.aggregators[k](output, nodes, mapping, cur_rows, self.num_samples)
 
+            #
+            # concatenate the aggregated features with the adjacent neighbor nodes' features
+            #
             cur_mapped_nodes = np.array([mapping[v] for v in nodes], dtype=np.int64)
             output = torch.cat((output[cur_mapped_nodes, :], aggregate), dim=1)
+
+            # pass through fully connected layer
             output = self.fcs[k](output)
+
             if is_last_layer(k):
                 break
+            
+            # apply relu activation, batch normalization, dropout, and normalization
             output = self.relu(output)
             output = self.bns[k](output)
             output = self.dropout(output)
