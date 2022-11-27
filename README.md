@@ -37,3 +37,5 @@ While training the GAT and GAT-v2 with Cora, I found that the GAT-v2 easily over
 [2] Petar Veličković, Guillem Cucurull, Arantxa Casanova, Adriana Romero, Pietro Liò, Yoshua Bengio. [Graph Attention Networks](https://arxiv.org/abs/1710.10903)
 
 [3] Shaked Brody, Uri Alon, Eran Yahav. [How Attentive are Graph Attention Networks?](https://arxiv.org/abs/2105.14491)
+
+[4] William L. Hamilton, Rex Ying, Jure Leskovec. [Inductive Representation Learning on Large Graphs](https://arxiv.org/abs/1706.02216)
