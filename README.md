@@ -28,7 +28,7 @@ While training the GAT and GAT-v2 with Cora, I found that the GAT-v2 easily over
 
 ## ToDo
 
-[x] Add training codes for GraphSAGE
+[v] Add training codes for GraphSAGE
 
 ## References
 
