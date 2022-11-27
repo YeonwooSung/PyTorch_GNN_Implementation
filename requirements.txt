@@ -20,3 +20,4 @@ torch-sparse==0.6.15
 tqdm==4.64.1
 typing_extensions==4.4.0
 urllib3==1.26.12
+pyhocon==0.3.59
