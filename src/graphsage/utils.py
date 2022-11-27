@@ -1,4 +1,5 @@
 import sys
+import os
 import torch
 import math
 
@@ -48,6 +49,9 @@ def evaluate(dataCenter, ds, graphSage, classification, device, max_vali_f1, nam
 		for param in params:
 			param.requires_grad = True
 
+		# check if models directory exists
+		if not os.path.exists('models'):
+			os.makedirs('models')
 		torch.save(models, 'models/model_best_{}_ep{}_{:.4f}.torch'.format(name, cur_epoch, test_f1))
 
 	for param in params:
