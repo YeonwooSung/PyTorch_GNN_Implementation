@@ -26,6 +26,12 @@ pip install -r requirements.txt
 
 While training the GAT and GAT-v2 with Cora, I found that the GAT-v2 easily overfitted. [S. Brody et. al. [3]](https://arxiv.org/abs/2105.14491) stated that "Intuitively, we believe that the more complex the interactions between nodes are – the more benefit a GNN can take from theoretically stronger graph attention mechanisms such as GATv2. The main question is whether the problem has a global ranking of “influential” nodes (GAT is sufficient), or do different nodes have different rankings of neighbors (use GATv2)". From here, I am assuming that the GAT-v2 model is too complex to be used on Cora dataset.
 
+### GraphSAGE works better than GAT
+
+With Cora dataset for node classification task, GAT got 81.3% accuracy, where GraphSAGE got 82.1% accuracy. Furthermore, the GraphSAGE model achieved 83.5% accuracy with Citeseer dataset, while GAT got 81.9% accuracy. From here, I am assuming that GraphSAGE is better than GAT for node classification task.
+
+Also, GraphSAGE achieved 88.6% for node classification task with Pubmed dataset. Did not tested GAT with Pubmed dataset, but I am assuming that GraphSAGE is better than GAT for node classification task.
+
 ## ToDo
 
 ## References
