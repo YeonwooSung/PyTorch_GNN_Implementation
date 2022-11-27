@@ -135,3 +135,7 @@ dmypy.json
 dataset/
 */dataset/
 */data/
+
+# models
+*/models/
+**/models/
