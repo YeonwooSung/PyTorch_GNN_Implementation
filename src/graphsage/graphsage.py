@@ -1,344 +1,310 @@
-import numpy as np
 import torch
+import random
 import torch.nn as nn
 import torch.nn.functional as F
 
 
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+class Classification(nn.Module):
 
-#-------------------------------------------------
-# Aggregators
+	def __init__(self, emb_size, num_classes):
+		super(Classification, self).__init__()
+		self.layer = nn.Sequential(nn.Linear(emb_size, num_classes))
+		self.init_params()
 
-class AggregationLayer(nn.Module):
-    def __init__(self, input_dim=None, output_dim=None):
-        """
-        Parameters
-        ----------
-        input_dim : int or None.
-            Dimension of input node features. Used for defining fully
-            connected layer in pooling aggregators. Default: None.
-        output_dim : int or None
-            Dimension of output node features. Used for defining fully
-            connected layer in pooling aggregators. Currently only works when
-            input_dim = output_dim. Default: None.
-        """
-        super().__init__()
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-    
-    def forward(self, features, nodes, mapping, rows, num_samples=25):
-        """
-        Parameters
-        ----------
-        features : torch.Tensor
-            An (n' x input_dim) tensor of input node features.
-        nodes : numpy array
-            nodes is a numpy array of nodes in the current layer of the computation graph.
-        mapping : dict
-            mapping is a dictionary mapping node v (labelled 0 to |V|-1) to
-            its position in the layer of nodes in the computationn graph
-            before nodes. For example, if the layer before nodes is [2,5],
-            then mapping[2] = 0 and mapping[5] = 1.
-        rows : numpy array
-            rows[i] is an array of neighbors of node i which is present in nodes.
-        num_samples : int
-            Number of neighbors to sample while aggregating. Default: 25.
-        Returns
-        -------
-        out : torch.Tensor
-            An (len(nodes) x output_dim) tensor of output node features.
-            Currently only works when output_dim = input_dim.
-        """
-        _choice, _len, _min = np.random.choice, len, min
-        mapped_rows = [np.array([mapping[v] for v in row], dtype=np.int64) for row in rows]
-        if num_samples == -1:
-            sampled_rows = mapped_rows
-        else:
-            sampled_rows = [_choice(row, _min(_len(row), num_samples), _len(row) < num_samples) for row in mapped_rows]
+	def init_params(self):
+		for param in self.parameters():
+			if len(param.size()) == 2:
+				nn.init.xavier_uniform_(param)
 
-        n = _len(nodes)
-        if self.__class__.__name__ == 'LSTMAggregationLayer':
-            out = torch.zeros(n, 2*self.output_dim).to(DEVICE)
-        else:
-            out = torch.zeros(n, self.output_dim).to(DEVICE)
-        for i in range(n):
-            if _len(sampled_rows[i]) != 0:
-                out[i, :] = self.aggregate(features[sampled_rows[i], :])
-        return out
+	def forward(self, embeds):
+		logists = torch.log_softmax(self.layer(embeds), 1)
+		return logists
 
 
-    def aggregate(self, features):
-        """
-        Parameters
-        ----------
-        Returns
-        -------
-        """
-        raise NotImplementedError
+class UnsupervisedLoss(object):
+	"""docstring for UnsupervisedLoss"""
+	def __init__(self, adj_lists, train_nodes, device):
+		super(UnsupervisedLoss, self).__init__()
+		self.Q = 10
+		self.N_WALKS = 6
+		self.WALK_LEN = 1
+		self.N_WALK_LEN = 5
+		self.MARGIN = 3
+		self.adj_lists = adj_lists
+		self.train_nodes = train_nodes
+		self.device = device
+
+		self.target_nodes = None
+		self.positive_pairs = []
+		self.negtive_pairs = []
+		self.node_positive_pairs = {}
+		self.node_negtive_pairs = {}
+		self.unique_nodes_batch = []
+
+	def get_loss_sage(self, embeddings, nodes):
+		assert len(embeddings) == len(self.unique_nodes_batch)
+		assert False not in [nodes[i]==self.unique_nodes_batch[i] for i in range(len(nodes))]
+		node2index = {n:i for i,n in enumerate(self.unique_nodes_batch)}
+
+		nodes_score = []
+		assert len(self.node_positive_pairs) == len(self.node_negtive_pairs)
+		for node in self.node_positive_pairs:
+			pps = self.node_positive_pairs[node]
+			nps = self.node_negtive_pairs[node]
+			if len(pps) == 0 or len(nps) == 0:
+				continue
+
+			# Q * Exception(negative score)
+			indexs = [list(x) for x in zip(*nps)]
+			node_indexs = [node2index[x] for x in indexs[0]]
+			neighb_indexs = [node2index[x] for x in indexs[1]]
+			neg_score = F.cosine_similarity(embeddings[node_indexs], embeddings[neighb_indexs])
+			neg_score = self.Q*torch.mean(torch.log(torch.sigmoid(-neg_score)), 0)
+			#print(neg_score)
+
+			# multiple positive score
+			indexs = [list(x) for x in zip(*pps)]
+			node_indexs = [node2index[x] for x in indexs[0]]
+			neighb_indexs = [node2index[x] for x in indexs[1]]
+			pos_score = F.cosine_similarity(embeddings[node_indexs], embeddings[neighb_indexs])
+			pos_score = torch.log(torch.sigmoid(pos_score))
+			#print(pos_score)
+
+			nodes_score.append(torch.mean(- pos_score - neg_score).view(1,-1))
+				
+		loss = torch.mean(torch.cat(nodes_score, 0))
+		
+		return loss
+
+	def get_loss_margin(self, embeddings, nodes):
+		assert len(embeddings) == len(self.unique_nodes_batch)
+		assert False not in [nodes[i]==self.unique_nodes_batch[i] for i in range(len(nodes))]
+		node2index = {n:i for i,n in enumerate(self.unique_nodes_batch)}
+
+		nodes_score = []
+		assert len(self.node_positive_pairs) == len(self.node_negtive_pairs)
+		for node in self.node_positive_pairs:
+			pps = self.node_positive_pairs[node]
+			nps = self.node_negtive_pairs[node]
+			if len(pps) == 0 or len(nps) == 0:
+				continue
+
+			indexs = [list(x) for x in zip(*pps)]
+			node_indexs = [node2index[x] for x in indexs[0]]
+			neighb_indexs = [node2index[x] for x in indexs[1]]
+			pos_score = F.cosine_similarity(embeddings[node_indexs], embeddings[neighb_indexs])
+			pos_score, _ = torch.min(torch.log(torch.sigmoid(pos_score)), 0)
+
+			indexs = [list(x) for x in zip(*nps)]
+			node_indexs = [node2index[x] for x in indexs[0]]
+			neighb_indexs = [node2index[x] for x in indexs[1]]
+			neg_score = F.cosine_similarity(embeddings[node_indexs], embeddings[neighb_indexs])
+			neg_score, _ = torch.max(torch.log(torch.sigmoid(neg_score)), 0)
+
+			nodes_score.append(torch.max(torch.tensor(0.0).to(self.device), neg_score-pos_score+self.MARGIN).view(1,-1))
+			# nodes_score.append((-pos_score - neg_score).view(1,-1))
+
+		loss = torch.mean(torch.cat(nodes_score, 0),0)
+
+		# loss = -torch.log(torch.sigmoid(pos_score))-4*torch.log(torch.sigmoid(-neg_score))
+		
+		return loss
 
 
-class MeanAggregationLayer(AggregationLayer):
-    def aggregate(self, features):
-        """
-        Parameters
-        ----------
-        features : torch.Tensor
-            Input features.
-        Returns
-        -------
-        Aggregated feature.
-        """
-        return torch.mean(features, dim=0)
+	def extend_nodes(self, nodes, num_neg=6):
+		self.positive_pairs = []
+		self.node_positive_pairs = {}
+		self.negtive_pairs = []
+		self.node_negtive_pairs = {}
+
+		self.target_nodes = nodes
+		self.get_positive_nodes(nodes)
+		# print(self.positive_pairs)
+		self.get_negtive_nodes(nodes, num_neg)
+		# print(self.negtive_pairs)
+		self.unique_nodes_batch = list(set([i for x in self.positive_pairs for i in x]) | set([i for x in self.negtive_pairs for i in x]))
+		assert set(self.target_nodes) < set(self.unique_nodes_batch)
+		return self.unique_nodes_batch
+
+	def get_positive_nodes(self, nodes):
+		return self._run_random_walks(nodes)
+
+	def get_negtive_nodes(self, nodes, num_neg):
+		for node in nodes:
+			neighbors = set([node])
+			frontier = set([node])
+			for i in range(self.N_WALK_LEN):
+				current = set()
+				for outer in frontier:
+					current |= self.adj_lists[int(outer)]
+				frontier = current - neighbors
+				neighbors |= current
+			far_nodes = set(self.train_nodes) - neighbors
+			neg_samples = random.sample(far_nodes, num_neg) if num_neg < len(far_nodes) else far_nodes
+			self.negtive_pairs.extend([(node, neg_node) for neg_node in neg_samples])
+			self.node_negtive_pairs[node] = [(node, neg_node) for neg_node in neg_samples]
+		return self.negtive_pairs
+
+	def _run_random_walks(self, nodes):
+		for node in nodes:
+			if len(self.adj_lists[int(node)]) == 0:
+				continue
+			cur_pairs = []
+			for i in range(self.N_WALKS):
+				curr_node = node
+				for j in range(self.WALK_LEN):
+					neighs = self.adj_lists[int(curr_node)]
+					next_node = random.choice(list(neighs))
+					# self co-occurrences are useless
+					if next_node != node and next_node in self.train_nodes:
+						self.positive_pairs.append((node,next_node))
+						cur_pairs.append((node,next_node))
+					curr_node = next_node
+
+			self.node_positive_pairs[node] = cur_pairs
+		return self.positive_pairs
+		
+
+class SageLayer(nn.Module):
+	"""
+	Encodes a node's using 'convolutional' GraphSage approach
+	"""
+	def __init__(self, input_size, out_size, gcn=False): 
+		super(SageLayer, self).__init__()
+
+		self.input_size = input_size
+		self.out_size = out_size
 
 
-class LSTMAggregationLayer(AggregationLayer):
-    def __init__(self, input_dim, output_dim):
-        """
-        Parameters
-        ----------
-        input_dim : int
-            Dimension of input node features. Used for defining LSTM layer.
-        output_dim : int
-            Dimension of output node features. Used for defining LSTM layer. Currently only works when output_dim = input_dim.
-        """
-        # super(LSTMAggregator, self).__init__(input_dim, output_dim, device)
-        super().__init__(input_dim, output_dim)
-        self.lstm = nn.LSTM(input_dim, output_dim, bidirectional=True, batch_first=True)
+		self.gcn = gcn
+		self.weight = nn.Parameter(torch.FloatTensor(out_size, self.input_size if self.gcn else 2 * self.input_size))
 
-    def aggregate(self, features):
-        """
-        Parameters
-        ----------
-        features : torch.Tensor
-            Input features.
-        Returns
-        -------
-        Aggregated feature.
-        """
-        perm = np.random.permutation(np.arange(features.shape[0]))
-        features = features[perm, :]
-        features = features.unsqueeze(0)
+		self.init_params()
 
-        out, _ = self.lstm(features)
-        out = out.squeeze(0)
-        out = torch.sum(out, dim=0)
+	def init_params(self):
+		for param in self.parameters():
+			nn.init.xavier_uniform_(param)
 
-        return out
+	def forward(self, self_feats, aggregate_feats, neighs=None):
+		"""
+		Generates embeddings for a batch of nodes.
 
+		nodes	 -- list of nodes
+		"""
+		if not self.gcn:
+			combined = torch.cat([self_feats, aggregate_feats], dim=1)
+		else:
+			combined = aggregate_feats
+		combined = F.relu(self.weight.mm(combined.t())).t()
+		return combined
 
-#------------------------------------------------------------
-# Pooling Aggregators
-
-class PoolingAggregationLayer(AggregationLayer):
-
-    def __init__(self, input_dim, output_dim):
-        """
-        Parameters
-        ----------
-        input_dim : int
-            Dimension of input node features. Used for defining fully connected layer.
-        output_dim : int
-            Dimension of output node features. Used for defining fully connected layer. Currently only works when output_dim = input_dim.
-        """
-        super().__init__(input_dim, output_dim)
-
-        self.fc1 = nn.Linear(input_dim, output_dim)
-        self.relu = nn.ReLU()
-
-    def aggregate(self, features):
-        """
-        Parameters
-        ----------
-        features : torch.Tensor
-            Input features.
-        Returns
-        -------
-        Aggregated feature.
-        """
-        out = self.relu(self.fc1(features))
-        return self._pool_fn(out)
-
-    def _pool_fn(self, features):
-        """
-        Parameters
-        ----------
-        Returns
-        -------
-        """
-        raise NotImplementedError
-
-
-class MaxPoolingAggregationLayer(PoolingAggregationLayer):
-    def _pool_fn(self, features):
-        """
-        Parameters
-        ----------
-        features : torch.Tensor
-            Input features.
-
-        Returns
-        -------
-        Aggregated feature.
-        """
-        return torch.max(features, dim=0)[0]
-
-
-class MeanPoolingAggregator(PoolingAggregationLayer):
-    def _pool_fn(self, features):
-        """
-        Parameters
-        ----------
-        features : torch.Tensor
-            Input features.
-
-        Returns
-        -------
-        Aggregated feature.
-        """
-        return torch.mean(features, dim=0)
-
-
-#------------------------------------------------------------
-# GraphSAGE model
 
 class GraphSAGE(nn.Module):
-    def __init__(
-        self, 
-        input_dim, 
-        hidden_dims, 
-        output_dim,
-        agg_class='max-pooling', 
-        dropout=0.5, 
-        num_samples=25
-    ) -> None:
-        """
-        Parameters
-        ----------
-        input_dim : int
-            Dimension of input node features.
-        hidden_dims : list of ints
-            Dimension of hidden layers. Must be non empty.
-        output_dim : int
-            Dimension of output node features.
-        agg_class : A string that indicates the aggregator class to be used.
-            Aggregator. One of the aggregator classes imported at the top of
-            this module.
-            Should be one of 'mean', 'mean-pooling', 'max-pooling', 'lstm'.
-            Default: 'max-pooling'.
-        dropout : float
-            Dropout rate. Default: 0.5.
-        num_samples : int
-            Number of neighbors to sample while aggregating. Default: 25.
-        """
-        super().__init__()
-        assert agg_class in ['mean', 'mean-pooling', 'max-pooling', 'lstm']
+	"""docstring for GraphSage"""
+	def __init__(self, num_layers, input_size, out_size, raw_features, adj_lists, device, gcn=False, agg_func='MEAN'):
+		super(GraphSAGE, self).__init__()
 
-        self.input_dim = input_dim
-        self.hidden_dims = hidden_dims if type(hidden_dims) == list else [hidden_dims]
-        self.output_dim = output_dim
-        self.agg_class = agg_class
-        self.num_samples = num_samples
-        self.num_layers = len(hidden_dims) + 1 if type(hidden_dims) == list else 3
+		self.input_size = input_size
+		self.out_size = out_size
+		self.num_layers = num_layers
+		self.gcn = gcn
+		self.device = device
+		self.agg_func = agg_func
 
-        aggregation_layer = {
-            'mean': MeanAggregationLayer,
-            'mean-pooling': MeanPoolingAggregator,
-            'max-pooling': MaxPoolingAggregationLayer,
-            'lstm': LSTMAggregationLayer
-        }[agg_class]
+		self.raw_features = raw_features
+		self.adj_lists = adj_lists
+
+		for index in range(1, num_layers+1):
+			layer_size = out_size if index != 1 else input_size
+			setattr(self, 'sage_layer'+str(index), SageLayer(layer_size, out_size, gcn=self.gcn))
+
+	def forward(self, nodes_batch):
+		"""
+		Generates embeddings for a batch of nodes.
+		nodes_batch	-- batch of nodes to learn the embeddings
+		"""
+		lower_layer_nodes = list(nodes_batch)
+		nodes_batch_layers = [(lower_layer_nodes,)]
+		
+		for i in range(self.num_layers):
+			lower_samp_neighs, lower_layer_nodes_dict, lower_layer_nodes= self._get_unique_neighs_list(lower_layer_nodes)
+			nodes_batch_layers.insert(0, (lower_layer_nodes, lower_samp_neighs, lower_layer_nodes_dict))
+
+		assert len(nodes_batch_layers) == self.num_layers + 1
+
+		pre_hidden_embs = self.raw_features
+		for index in range(1, self.num_layers+1):
+			nb = nodes_batch_layers[index][0]
+			pre_neighs = nodes_batch_layers[index-1]
+			
+			aggregate_feats = self.aggregate(nb, pre_hidden_embs, pre_neighs)
+			sage_layer = getattr(self, 'sage_layer'+str(index))
+			if index > 1:
+				nb = self._nodes_map(nb, pre_hidden_embs, pre_neighs)
+			
+			cur_hidden_embs = sage_layer(self_feats=pre_hidden_embs[nb], aggregate_feats=aggregate_feats)
+			pre_hidden_embs = cur_hidden_embs
+
+		return pre_hidden_embs
 
 
-        c = 3 if aggregation_layer == LSTMAggregationLayer else 2
+	def _nodes_map(self, nodes, hidden_embs, neighs):
+		layer_nodes, samp_neighs, layer_nodes_dict = neighs
+		assert len(samp_neighs) == len(nodes)
+		index = [layer_nodes_dict[x] for x in nodes]
+		return index
 
-        if type(hidden_dims) != list:
-            self.fcs = nn.ModuleList([nn.Linear(c*input_dim, hidden_dims), nn.Linear(c*hidden_dims, hidden_dims), nn.Linear(c*hidden_dims, output_dim)])
-            self.bns = nn.ModuleList([nn.BatchNorm1d(hidden_dims), nn.BatchNorm1d(hidden_dims)])
 
-            self.aggregators = nn.ModuleList([aggregation_layer(input_dim, input_dim), aggregation_layer(hidden_dims, hidden_dims), aggregation_layer(hidden_dims, hidden_dims)])
-        else:
-            self.aggregators = nn.ModuleList([aggregation_layer(input_dim, input_dim)])
-            self.aggregators.extend([aggregation_layer(dim, dim) for dim in self.hidden_dims])
-            self.aggregators.extend([aggregation_layer(self.hidden_dims[-1], output_dim)])
+	def _get_unique_neighs_list(self, nodes, num_sample=10):
+		_set = set
+		to_neighs = [self.adj_lists[int(node)] for node in nodes]
+		if not num_sample is None:
+			_sample = random.sample
+			samp_neighs = [_set(_sample(to_neigh, num_sample)) if len(to_neigh) >= num_sample else to_neigh for to_neigh in to_neighs]
+		else:
+			samp_neighs = to_neighs
+		samp_neighs = [samp_neigh | set([nodes[i]]) for i, samp_neigh in enumerate(samp_neighs)]
+		_unique_nodes_list = list(set.union(*samp_neighs))
+		i = list(range(len(_unique_nodes_list)))
+		unique_nodes = dict(list(zip(_unique_nodes_list, i)))
+		return samp_neighs, unique_nodes, _unique_nodes_list
 
-            self.fcs = nn.ModuleList([nn.Linear(c*input_dim, hidden_dims[0])])
-            self.fcs.extend([nn.Linear(c*hidden_dims[i-1], hidden_dims[i]) for i in range(1, len(hidden_dims))])
-            self.fcs.extend([nn.Linear(c*hidden_dims[-1], output_dim)])
 
-            self.bns = nn.ModuleList([nn.BatchNorm1d(hidden_dim) for hidden_dim in hidden_dims])
+	def aggregate(self, nodes, pre_hidden_embs, pre_neighs, num_sample=10):
+		unique_nodes_list, samp_neighs, unique_nodes = pre_neighs
 
-        self.dropout = nn.Dropout(dropout)
+		assert len(nodes) == len(samp_neighs)
+		indicator = [(nodes[i] in samp_neighs[i]) for i in range(len(samp_neighs))]
+		assert (False not in indicator)
 
-        self.relu = nn.ReLU()
-    
+		if not self.gcn:
+			samp_neighs = [(samp_neighs[i]-set([nodes[i]])) for i in range(len(samp_neighs))]
 
-    def forward(
-        self, 
-        features, 
-        node_layers, 
-        mappings, 
-        adjacent_matrix, 
-        eps=1e-6,
-    ) -> torch.Tensor:
-        """
-        Parameters
-        ----------
-        features : torch.Tensor
-            An (n' x input_dim) tensor of input node features.
-        node_layers : list of numpy array
-            node_layers[i] is an array of the nodes in the ith layer of the
-            computation graph.
-        mappings : list of dictionary
-            mappings[i] is a dictionary mapping node v (labelled 0 to |V|-1)
-            in node_layers[i] to its position in node_layers[i]. For example,
-            if node_layers[i] = [2,5], then mappings[i][2] = 0 and
-            mappings[i][5] = 1.
-        adjacent_matrix : numpy array
-            An (n' x n') adjacency matrix of the computation graph.
-            adjacent_matrix[i] is an array of neighbors of node i.
-        eps: float
-            A small number to avoid division by zero.
-            default: 1e-6.
+		if len(pre_hidden_embs) == len(unique_nodes):
+			embed_matrix = pre_hidden_embs
+		else:
+			embed_matrix = pre_hidden_embs[torch.LongTensor(unique_nodes_list)]
 
-        Returns
-        -------
-        out : torch.Tensor
-            An (len(node_layers[-1]) x output_dim) tensor of output node features.
-        """
-        output = features
-        print(output.shape)
+		mask = torch.zeros(len(samp_neighs), len(unique_nodes))
+		column_indices = [unique_nodes[n] for samp_neigh in samp_neighs for n in samp_neigh]
+		row_indices = [i for i in range(len(samp_neighs)) for j in range(len(samp_neighs[i]))]
+		mask[row_indices, column_indices] = 1
 
-        def is_last_layer(i):
-            return i == self.num_layers - 1
+		if self.agg_func == 'MEAN':
+			num_neigh = mask.sum(1, keepdim=True)
+			mask = mask.div(num_neigh).to(embed_matrix.device)
+			aggregate_feats = mask.mm(embed_matrix)
 
-        for k in range(self.num_layers):
-            print(f'Layer {k}')
-            nodes = node_layers[k+1]
-            mapping = mappings[k]
-            init_mapped_nodes = np.array([mappings[0][v] for v in nodes], dtype=np.int64)
+		elif self.agg_func == 'MAX':
+			# print(mask)
+			indexs = [x.nonzero() for x in mask==1]
+			aggregate_feats = []
+			# self.dc.logger.info('5')
+			for feat in [embed_matrix[x.squeeze()] for x in indexs]:
+				if len(feat.size()) == 1:
+					aggregate_feats.append(feat.view(1, -1))
+				else:
+					aggregate_feats.append(torch.max(feat,0)[0].view(1, -1))
+			aggregate_feats = torch.cat(aggregate_feats, 0)
 
-            # get neighbor nodes of current target nodes by sampling from adjacent matrix
-            cur_rows = adjacent_matrix[init_mapped_nodes]
-            
-            aggregate = self.aggregators[k](output, nodes, mapping, cur_rows, self.num_samples)
-
-            #
-            # concatenate the aggregated features with the adjacent neighbor nodes' features
-            #
-            cur_mapped_nodes = np.array([mapping[v] for v in nodes], dtype=np.int64)
-            output = torch.cat((output[cur_mapped_nodes, :], aggregate), dim=1)
-
-            # pass through fully connected layer
-            output = self.fcs[k](output)
-
-            if is_last_layer(k):
-                break
-            
-            # apply relu activation, batch normalization, dropout, and normalization
-            output = self.relu(output)
-            output = self.bns[k](output)
-            output = self.dropout(output)
-            divider = output.norm(dim=1, keepdim=True) + eps
-            output = output.div(divider)
-            print(output.shape)
-        print(output.shape)
-        return output
+		return aggregate_feats
