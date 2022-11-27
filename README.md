@@ -75,7 +75,7 @@ _How Attentive are Graph Attention Networks?_
 
 Authors: Shaked Brody, Uri Alon, Eran Yahav
 
-[GAT v2](./src/gat-v2/) [paper](https://arxiv.org/abs/2105.14491)
+[src](./src/gat-v2/) [paper](https://arxiv.org/abs/2105.14491)
 
 #### Abstract
 
