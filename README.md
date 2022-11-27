@@ -16,6 +16,7 @@ pip install -r requirements.txt
 ## Models
 
 - [Graph Convolutional Network](./src/gcn/)
+- [GraphSAGE](./src/graphsage/)
 - [GAT](./src/gat/)
 - [GAT v2](./src/gat-v2/)
 
@@ -27,7 +28,7 @@ While training the GAT and GAT-v2 with Cora, I found that the GAT-v2 easily over
 
 ## ToDo
 
-[ ] Add training codes for GraphSAGE
+[x] Add training codes for GraphSAGE
 
 ## References
 
