@@ -28,8 +28,6 @@ While training the GAT and GAT-v2 with Cora, I found that the GAT-v2 easily over
 
 ## ToDo
 
-[v] Add training codes for GraphSAGE
-
 ## References
 
 [1] Thomas N. Kipf, Max Welling. [Semi-Supervised Classification with Graph Convolutional Networks](https://arxiv.org/abs/1609.02907)
