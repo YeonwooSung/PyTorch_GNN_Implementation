@@ -80,15 +80,20 @@ def get_gnn_embeddings(gnn_model, dataCenter, ds):
     print('Embeddings loaded.')
     return embs.detach()
 
+
 def train_classification(dataCenter, graphSage, classification, ds, device, max_vali_f1, name, epochs=800):
 	print('Training Classification ...')
 	c_optimizer = torch.optim.SGD(classification.parameters(), lr=0.5)
+
 	# train classification, detached from the current graph
-	#classification.init_params()
+	classification.init_params()
+	
 	b_sz = 50
+	
 	train_nodes = getattr(dataCenter, ds+'_train')
 	labels = getattr(dataCenter, ds+'_labels')
 	features = get_gnn_embeddings(graphSage, dataCenter, ds)
+	
 	for epoch in range(epochs):
 		train_nodes = shuffle(train_nodes)
 		batches = math.ceil(len(train_nodes) / b_sz)
@@ -112,6 +117,7 @@ def train_classification(dataCenter, graphSage, classification, ds, device, max_
 
 		max_vali_f1 = evaluate(dataCenter, ds, graphSage, classification, device, max_vali_f1, name, epoch)
 	return classification, max_vali_f1
+
 
 def apply_model(dataCenter, ds, graphSage, classification, unsupervised_loss, b_sz, unsup_loss, device, learn_method):
 	test_nodes = getattr(dataCenter, ds+'_test')
