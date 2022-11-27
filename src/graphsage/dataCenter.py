@@ -40,16 +40,8 @@ class DataCenter(object):
 					adj_lists[paper1].add(paper2)
 					adj_lists[paper2].add(paper1)
 
-			assert len(feat_data) == len(labels) == len(adj_lists)
-			test_indexs, val_indexs, train_indexs = self._split_data(feat_data.shape[0])
-
-			setattr(self, dataSet+'_test', test_indexs)
-			setattr(self, dataSet+'_val', val_indexs)
-			setattr(self, dataSet+'_train', train_indexs)
-
-			setattr(self, dataSet+'_feats', feat_data)
-			setattr(self, dataSet+'_labels', labels)
-			setattr(self, dataSet+'_adj_lists', adj_lists)
+			# set data attributes
+			self._set_data_attributes(dataSet, feat_data, labels, adj_lists)
 
 		elif dataSet == 'pubmed':
 			pubmed_content_file = self.config['file_path.pubmed_paper']
@@ -85,16 +77,21 @@ class DataCenter(object):
 					adj_lists[paper1].add(paper2)
 					adj_lists[paper2].add(paper1)
 			
-			assert len(feat_data) == len(labels) == len(adj_lists)
-			test_indexs, val_indexs, train_indexs = self._split_data(feat_data.shape[0])
+			# set data attributes
+			self._set_data_attributes(dataSet, feat_data, labels, adj_lists)
 
-			setattr(self, dataSet+'_test', test_indexs)
-			setattr(self, dataSet+'_val', val_indexs)
-			setattr(self, dataSet+'_train', train_indexs)
 
-			setattr(self, dataSet+'_feats', feat_data)
-			setattr(self, dataSet+'_labels', labels)
-			setattr(self, dataSet+'_adj_lists', adj_lists)
+	def _set_data_attributes(self, dataSet, feat_data, labels, adj_lists):
+		assert len(feat_data) == len(labels) == len(adj_lists)
+		test_indexs, val_indexs, train_indexs = self._split_data(feat_data.shape[0])
+
+		setattr(self, dataSet+'_test', test_indexs)
+		setattr(self, dataSet+'_val', val_indexs)
+		setattr(self, dataSet+'_train', train_indexs)
+
+		setattr(self, dataSet+'_feats', feat_data)
+		setattr(self, dataSet+'_labels', labels)
+		setattr(self, dataSet+'_adj_lists', adj_lists)
 
 
 	def _split_data(self, num_nodes, test_split = 3, val_split = 6):
