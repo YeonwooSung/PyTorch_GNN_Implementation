@@ -13,7 +13,7 @@ requests==2.28.1
 scikit-learn==1.1.2
 scipy==1.9.2
 threadpoolctl==3.1.0
-torch==1.12.1
+torch==1.13.1
 torch-geometric==2.1.0.post1
 torch-scatter==2.0.9
 torch-sparse==0.6.15
